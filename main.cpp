@@ -15,4 +15,6 @@ int main(){
     for(int i=0;i<x.size();i++){
         std::cout<<x.read_at(i)<<std::endl;
     }
+
+    std::cout<<x.pop_back()<<" "<<x.pop_back()<<std::endl;
 }

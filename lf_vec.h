@@ -102,6 +102,7 @@ private:
         if(!res){ 
             delete[] bucket_new;
         }
+        std::cout<<"alloced new bucket size "<<bucket_size<<" for bucket "<<bucket<<std::endl;
     }
 public:
     Vector(){
@@ -126,6 +127,8 @@ public:
             complete_write(desc_curr->write);
 
             int bucket = highest_bit(desc_curr->size + FIRST_BUCKET_SIZE) - highest_bit(FIRST_BUCKET_SIZE);
+            std::cout<<"pushing on bucket "<<bucket<<std::endl;
+
             if(this->memory[bucket] == nullptr){
                 alloc_bucket(bucket);
             }
@@ -144,7 +147,20 @@ public:
         complete_write(this->descriptor.load()->write);
     }
 
-    T pop_back();
+    // [TODO]: add memory managment
+    T pop_back(){
+        while(true){
+            Descriptor<T>* desc_curr = this->descriptor.load();
+            complete_write(desc_curr->write);
+
+            T res = *at(desc_curr->size - 1);
+            Descriptor<T>* desc_new = new Descriptor<T>(nullptr,desc_curr->size-1,0);
+
+            if(this->descriptor.compare_exchange_strong(desc_curr,desc_new)){
+                return res;
+            }
+        }
+    }
 
     // random accesses
     void write_at(size_t idx, T val){
