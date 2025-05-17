@@ -1,10 +1,17 @@
 #ifndef LF_VEC_H
 #define LF_VEC_H
 #include <cassert>
-#include <climits>
+#include <cmath>
+#include <atomic>
 #include <iostream>
 
 #define FIRST_BUCKET_SIZE 8 // as stated in 3.3 operations
+
+// setting 16 as our max becuase our vector grows exponentially with FIRST_BUCKET_SIZE
+// here our max elements would be the sum of FIRST_BUCKET_SIZE^(1...16)
+// or in other words FIRST_BUCKET_SIZE^(1....VEC_L1_MAX_SIZE)
+// also we are limited by the number of bits used for indexing
+#define VEC_L1_MAX_SIZE 16
 
 // NOTE:
 // we can replace the HighestBit instruciton with std::bit_width(x) in C++ 20
@@ -25,14 +32,14 @@ namespace lockfree {
 template <typename T>
 class Vector {
 private:
-    // pointer array to valid blocks of memory 
-    T** memory; 
+    // array of atomic pointers, pointing to an array of atomic references of T 
+    std::atomic<std::atomic<T>*> memory[VEC_L1_MAX_SIZE]; 
 
     // indexes into our array at the specfic spot we need with clever bitwise operations
     // simply put, our bucket size grows in powers of 8 (assuming 8 is the first bucket size)
     // we can then use the MSB to mark the number of buckets we currently have in the array 
     // with that we can mask to find the specfic element in that array section for that bucket
-    T* at(int idx){
+    std::atomic<T>* at(int idx){
         int pos = idx + FIRST_BUCKET_SIZE; // get our requested position
         int hibit = highest_bit(pos); 
 
@@ -42,12 +49,32 @@ private:
         
         return &this->memory[hibit - highest_bit(FIRST_BUCKET_SIZE)][new_idx];
     }
+
+    // allocates a new bucket(index) 
+    // new_bucket_size = FIRST_BUCKET_SIZE^(bucket+1)
+    void alloc_bucket(int bucket){
+        int bucket_size = pow(FIRST_BUCKET_SIZE,bucket+1);
+
+        std::atomic<T>* bucket_new = new std::atomic<T>[bucket_size]; // alloc new bucket
+        std::atomic<T>* bucket_empty = nullptr; // empty bucket
+
+        // attempt to set our bucket
+        bool res = this->memory[bucket].compare_exchange_strong(bucket_empty,bucket_new);
+        
+        // someone has already alloced this bucket
+        if(!res){ 
+            delete[] bucket_new;
+        }
+    }
 public:
     Vector(){
-        T** buckets = new T*[1];
-        buckets[0] = new T[FIRST_BUCKET_SIZE];
+        // defaulting the pointer to NULL for easy alloc_bucket operations
+        for(int i=0;i<VEC_L1_MAX_SIZE;i++){
+            this->memory[i]=nullptr;
+        }
 
-        this->memory = buckets; 
+        // init our first bucket
+        alloc_bucket(0);
     }
 
     // vector functions
@@ -57,11 +84,11 @@ public:
 
     // random accesses
     void write_at(size_t idx, T val){
-        *at(idx) = val;
+        at(idx)->store(val);
     }
 
     T read_at(size_t idx){
-        return *at(idx);
+        return at(idx)->load();
     }
 
     // other
