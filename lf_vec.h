@@ -27,6 +27,41 @@ int highest_bit(int x){
 }
 
 namespace lockfree {
+// WriteDescriptor enforces the semantics of pop_back and push_back operations
+// allow for multiple memory locations to be modified in a "single" operation
+template <typename T>
+class WriteDescriptor{
+public:
+    T old_val;
+    T new_val;
+    int pos;
+    bool completed;
+
+    WriteDescriptor(T old_val, T new_val, int pos){
+        this->old_val = old_val;
+        this->new_val = new_val;
+        this->pos = pos;
+        this->completed = false;
+    }
+};
+
+// Descriptor which holds an optional reference to a write descriptor
+// our Descriptor object guarantes the semantics of pop_back and push_back operations
+template <typename T>
+class Descriptor{
+public: 
+    WriteDescriptor<T>* write = nullptr;
+    size_t size;
+    size_t counter; // reference counter
+
+    Descriptor(){ this->write = nullptr; this->size = 0; this->counter = 0;}
+    Descriptor(WriteDescriptor<T>* write, size_t size, size_t counter){ this->write = write; this->size = size; this->counter = counter;}
+
+    bool write_op_pending(){
+        return (this->write != nullptr && !this->write->completed);
+    }
+};
+
 // contains the logic and functions necessary to complete vector operations
 // what the user will use at an abstract level
 template <typename T>
@@ -34,6 +69,8 @@ class Vector {
 private:
     // array of atomic pointers, pointing to an array of atomic references of T 
     std::atomic<std::atomic<T>*> memory[VEC_L1_MAX_SIZE]; 
+
+    std::atomic<Descriptor<T>*> descriptor;
 
     // indexes into our array at the specfic spot we need with clever bitwise operations
     // simply put, our bucket size grows in powers of 8 (assuming 8 is the first bucket size)
@@ -75,11 +112,38 @@ public:
 
         // init our first bucket
         alloc_bucket(0);
+        this->descriptor.store(new Descriptor<T>(nullptr,0,0));
     }
 
     // vector functions
     void resize(size_t size);
-    size_t push_back(T);
+
+    // [TODO]: add proper memory managment
+    void push_back(T elem){
+        while(true){
+            Descriptor<T>* desc_curr = this->descriptor.load();
+
+            complete_write(desc_curr->write);
+
+            int bucket = highest_bit(desc_curr->size + FIRST_BUCKET_SIZE) - highest_bit(FIRST_BUCKET_SIZE);
+            if(this->memory[bucket] == nullptr){
+                alloc_bucket(bucket);
+            }
+
+            WriteDescriptor<T>* write_op = new WriteDescriptor<T>(*at(desc_curr->size), elem, desc_curr->size);
+            Descriptor<T>* desc_new = new Descriptor(write_op, desc_curr->size + 1, 0);
+
+            if(this->descriptor.compare_exchange_strong(desc_curr,desc_new)){
+                break;
+            }
+
+            delete write_op;
+            delete desc_new;
+        }   
+
+        complete_write(this->descriptor.load()->write);
+    }
+
     T pop_back();
 
     // random accesses
@@ -92,30 +156,26 @@ public:
     }
 
     // other
-    size_t size();
-};
+    void complete_write(WriteDescriptor<T>* write_op){
+        if(write_op != nullptr && !write_op->completed){
+            at(write_op->pos)->compare_exchange_strong(write_op->old_val,write_op->new_val);
+            write_op->completed = true;
+        }
+    }
 
-// WriteDescriptor enforces the semantics of pop_back and push_back operations
-// allow for multiple memory locations to be modified in a "single" operation
-template <typename T>
-class WriteDescriptor{
-public:
-    T old_val;
-    T new_val;
-    T* loc;
-    bool completed;
-};
 
-// Descriptor which holds an optional reference to a write descriptor
-// our Descriptor object guarantes the semantics of pop_back and push_back operations
-template <typename T>
-class Descriptor{
-public: 
-    WriteDescriptor<T>* write;
-    size_t size;
-    size_t counter; // reference counter
-};
+    size_t size(){
+        Descriptor<T>* desc = this->descriptor.load();
+        size_t size = desc->size;
 
+        // pending...
+        if(desc->write_op_pending()){
+            return size-1;
+        }
+
+        return size;
+    }
+};
 };
 
 #endif
