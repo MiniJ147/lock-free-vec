@@ -11,11 +11,19 @@ public:
     int pos;
     bool completed;
 
-    WriteDescriptor(T old_val, T new_val, int pos){
-        this->old_val = old_val;
-        this->new_val = new_val;
-        this->pos = pos;
-        this->completed = false;
+    WriteDescriptor<T>(){};
+    WriteDescriptor(T _old_val, T _new_val, int _pos)
+    : old_val(_old_val), new_val(_new_val), pos(_pos), completed(false){}
+
+    void replace(WriteDescriptor<T> _new){
+        // if(this == _new){
+            // return;
+        // }
+
+        old_val = _new.old_val;
+        new_val = _new.new_val;
+        pos = _new.pos;
+        completed = _new.completed;
     }
 };
 
@@ -33,6 +41,9 @@ public:
 
     Descriptor() : write(nullptr), size(0), counter(0){};
     Descriptor(WriteDescriptor<T>* _write, size_t _size, size_t _counter): write(_write),size(_size),counter(_counter){};
+    // ~Descriptor(){
+        // std::cout<<"dropped\n";
+    // }
 
     void reference(){
         counter.fetch_add(1);
@@ -49,6 +60,15 @@ public:
 
     bool write_op_pending(){
         return (this->write != nullptr && !this->write->completed);
+    }
+
+    void replace(Descriptor<T>& _new){
+        // if(this == _new){
+            // return;
+        // }
+
+        write = _new.write;
+        size = _new.size;
     }
 };
 
