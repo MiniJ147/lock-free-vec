@@ -12,14 +12,15 @@ lockfree::Vector<int> x;
 void work(int id){
     int lx = 0;
     int pops = 0;
+    x.set_id(id);
     while(!cancel_flag){ 
         x.push_back(id);
-        if(id & 1 && x.size() > 1){ 
-            x.pop_back();
-            pops++;
-        }
+        // if(id & 1 && x.size() > 1){ 
+        //     x.pop_back();
+        //     pops++;
+        // }
         lx++;
-        // std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        // std::this_thread::sleep_for(std::chrono::milliseconds(2000));
     }
     // std::this_thread::sleep_for(std::chrono::seconds(id));
     std::cout<<"id: "<<id<<" push: "<<lx<<" pops: "<<pops<<std::endl;
@@ -45,7 +46,7 @@ int main(){
         threads.push_back(std::thread(work,i));
     }
 
-    std::this_thread::sleep_for(std::chrono::seconds(60));
+    std::this_thread::sleep_for(std::chrono::seconds(30));
     cancel_flag = true;
     std::cout<<"starting cancel\n";
 

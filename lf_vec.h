@@ -21,6 +21,16 @@
 // put simply don't go over this number
 #define MAX_THREADS 32
 
+// this should equla MAX_THREADS
+// but you can set it to 1 for orginal version
+#define MAX_POOLS MAX_THREADS 
+
+// as stated in comments further down in the code
+#define POOL_SIZE 2*MAX_THREADS+1
+
+thread_local int thread_id = -1;
+thread_local int thread_pool = -1;
+
 // NOTE:
 // we can replace the HighestBit instruciton with std::bit_width(x) in C++ 20
 int highest_bit(int x){
@@ -69,7 +79,11 @@ private:
     // We then have +1 for the Vector Descriptor (which is its own reference) 
     // I think the +1 is unnecessary because of the progress gunarate of at least one thread succeeding
     // but I didn't prove this hard so I left it in
-    mem::Pool<T> pool = mem::Pool<T>(2*(MAX_THREADS)+1);
+    // mem::Pool<T> pool = mem::Pool<T>(2*(MAX_THREADS)+1);
+    
+    // mega pool used for bench marking
+    // id is the given thread
+    mem::Pool<T> pools[MAX_THREADS];
     
 
     // indexes into our array at the specfic spot we need with clever bitwise operations
@@ -114,7 +128,7 @@ private:
             mem::Node<T>* node = this->descriptor.load(std::memory_order_acquire);
 
             // attempt to insert our reference on the block
-            node = this->pool.alloc(node->id);
+            node = this->pools[node->pool_id].alloc(node->id);
 
             // check to make sure descriptor didn't change
             // if it did then our reference will be invalid
@@ -123,7 +137,7 @@ private:
             }
 
             // Someone else swapped it — roll back our reference
-            pool.release(node->id);
+            pools[node->pool_id].release(node->id);
         }
     }
 
@@ -138,9 +152,9 @@ private:
     // the reason is the vectors descriptor counts as it's own reference
     // meaning we need to drop the current Thread and the Vector Descriptor
     // since it moved
-    inline void swapped_desc(int desc_id) {
-        pool.release(desc_id);
-        pool.release(desc_id); 
+    inline void swapped_desc(int pool_id, int desc_id) {
+        pools[pool_id].release(desc_id);
+        pools[pool_id].release(desc_id); 
     }
 public:
     Vector(){
@@ -149,14 +163,19 @@ public:
             this->memory[i]=nullptr;
         }
 
+        // allocate our pools
+        for(int pool_id=0; pool_id<MAX_POOLS;pool_id++){
+            pools[pool_id] = mem::Pool<T>(pool_id,POOL_SIZE);
+        }
+
         // init our first bucket
         alloc_bucket(0);
-        this->descriptor.store(pool.alloc());
+        this->descriptor.store(pools[0].alloc()); // give thread 0 descriptor reference
     }
 
     // vector functions
     void push_back(T elem){
-        mem::Node<T>* thread_node = pool.alloc(); // fetch our block
+        mem::Node<T>* thread_node = pools[thread_pool].alloc(); // fetch our block
         while(true){
             mem::Node<T>* curr_node = fetch_descriptor(); // fetch our descriptor (+1 ref)
             Descriptor<T>* desc_curr = &curr_node->desc; // grab desc
@@ -182,25 +201,25 @@ public:
             // however CXS will update our reference which will prevent us from dropping
             // it will also lead to negative references
             // [took an all nighter to figure this out and memory debuggers :( ]
-            mem::Node<T>* old = curr_node;
+            mem::Node<T>* old_desc_node = curr_node;
             if(this->descriptor.compare_exchange_strong(curr_node,thread_node)){
                 // we don't need to add a new reference for the vector descriptor
                 // since we will just reuse our reference when fetching the local copy (thread_node)
-                swapped_desc(curr_node->id);
+                swapped_desc(curr_node->pool_id,curr_node->id);
                 break;
             }
 
             // we failed the CAS so we could drop this reference
-            pool.release(old->id);
+            pools[old_desc_node->pool_id].release(old_desc_node->id);
         }   
 
         mem::Node<T>* curr = fetch_descriptor();
         complete_write(&curr->write);
-        pool.release(curr->id);
+        pools[curr->pool_id].release(curr->id);
     }
 
     T pop_back(){
-        mem::Node<T>* thread_node = pool.alloc(); // fetch our block
+        mem::Node<T>* thread_node = pools[thread_pool].alloc(); // fetch our block
         while(true){
             mem::Node<T>* curr_node = fetch_descriptor();
             Descriptor<T>* desc_curr = &curr_node->desc;
@@ -214,11 +233,11 @@ public:
 
             mem::Node<T>* old = curr_node;
             if(this->descriptor.compare_exchange_strong(curr_node,thread_node)){
-                swapped_desc(curr_node->id);
+                swapped_desc(curr_node->pool_id,curr_node->id);
                 return res;
             }
 
-            pool.release(old->id);
+            pools[old->pool_id].release(old->id);
         }
     }
 
@@ -238,13 +257,18 @@ public:
 
         // pending...
         if(block->desc.write_op_pending()){
-            pool.release(block->id);
+            pools[block->pool_id].release(block->id);
             return size-1;
         }
 
-        pool.release(block->id);
+        pools[block->pool_id].release(block->id);
         return size;
     } 
+
+    void set_id(int id){
+        thread_id = id;
+        thread_pool = thread_id % MAX_POOLS;
+    }
 };
 };
 
