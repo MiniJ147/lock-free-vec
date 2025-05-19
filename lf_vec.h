@@ -17,7 +17,7 @@
 #define VEC_L1_MAX_SIZE 32
 
 // used for the pool 
-#define MAX_THREADS 4
+#define MAX_THREADS 32
 
 // NOTE:
 // we can replace the HighestBit instruciton with std::bit_width(x) in C++ 20
@@ -103,23 +103,6 @@ public:
     // vector functions
     void resize(size_t size);
 
-    // mem::Node<T>* fetch_descriptor(){
-    //     mem::Node<T>* node;
-    //     while(1){
-    //         node = this->descriptor.load();
-    //         node->ref.fetch_add(1); // try to insert our reference
-    //
-    //         // check that it is vaild
-    //         if(node==this->descriptor.load()){
-    //             // std::cout<<"fetched descriptor\n";
-    //             return node;
-    //         }
-    //
-    //         // std::cout<<"failed reference leaving now\n";
-    //         node->ref.fetch_add(-1); // leave the reference
-    //     }
-    // }
-
     mem::Node<T>* fetch_descriptor() {
         while (true) {
             mem::Node<T>* node = this->descriptor.load(std::memory_order_acquire);
@@ -197,12 +180,13 @@ public:
             Descriptor<T> desc_new = Descriptor<T>(nullptr,desc_curr->size-1,0);
             thread_node->desc.replace(desc_new);
 
+            mem::Node<T>* old = curr_node;
             if(this->descriptor.compare_exchange_strong(curr_node,thread_node)){
                 swapped_desc(curr_node->id);
                 return res;
             }
 
-            pool.release(curr_node->id);
+            pool.release(old->id);
         }
     }
 

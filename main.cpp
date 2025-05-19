@@ -11,13 +11,18 @@ std::atomic<bool> cancel_flag(false);
 lockfree::Vector<int> x;
 void work(int id){
     int lx = 0;
-    while(!cancel_flag){
+    int pops = 0;
+    while(!cancel_flag){ 
         x.push_back(id);
+        if(id & 1 && x.size() > 1){ 
+            x.pop_back();
+            pops++;
+        }
         lx++;
         // std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
     // std::this_thread::sleep_for(std::chrono::seconds(id));
-    // std::cout<<"id: "<<id<<" work: "<<lx<<std::endl;
+    std::cout<<"id: "<<id<<" push: "<<lx<<" pops: "<<pops<<std::endl;
     // std::this_thread::sleep_for(std::chrono::seconds(2));
 }
 

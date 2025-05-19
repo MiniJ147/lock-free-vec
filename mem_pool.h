@@ -76,8 +76,8 @@ public:
     void release(int id){
         // std::cout<<"releasing "<<id<<std::endl;
         int old = mem[id].ref.fetch_add(-1,std::memory_order_acq_rel);
-        // print_stuff("re");
-        // assert(old>0);
+        print_stuff("re");
+        assert(old>0);
     }
 };
 };
