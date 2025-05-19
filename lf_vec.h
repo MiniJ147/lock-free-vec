@@ -4,6 +4,7 @@
 #include <cmath>
 #include <atomic>
 #include <iostream>
+#include "descriptors.h"
 
 #define FIRST_BUCKET_SIZE 8 // as stated in 3.3 operations
 
@@ -27,41 +28,6 @@ int highest_bit(int x){
 }
 
 namespace lockfree {
-// WriteDescriptor enforces the semantics of pop_back and push_back operations
-// allow for multiple memory locations to be modified in a "single" operation
-template <typename T>
-class WriteDescriptor{
-public:
-    T old_val;
-    T new_val;
-    int pos;
-    bool completed;
-
-    WriteDescriptor(T old_val, T new_val, int pos){
-        this->old_val = old_val;
-        this->new_val = new_val;
-        this->pos = pos;
-        this->completed = false;
-    }
-};
-
-// Descriptor which holds an optional reference to a write descriptor
-// our Descriptor object guarantes the semantics of pop_back and push_back operations
-template <typename T>
-class Descriptor{
-public: 
-    WriteDescriptor<T>* write = nullptr;
-    size_t size;
-    size_t counter; // reference counter
-
-    Descriptor(){ this->write = nullptr; this->size = 0; this->counter = 0;}
-    Descriptor(WriteDescriptor<T>* write, size_t size, size_t counter){ this->write = write; this->size = size; this->counter = counter;}
-
-    bool write_op_pending(){
-        return (this->write != nullptr && !this->write->completed);
-    }
-};
-
 // contains the logic and functions necessary to complete vector operations
 // what the user will use at an abstract level
 template <typename T>
@@ -123,7 +89,6 @@ public:
     void push_back(T elem){
         while(true){
             Descriptor<T>* desc_curr = this->descriptor.load();
-
             complete_write(desc_curr->write);
 
             int bucket = highest_bit(desc_curr->size + FIRST_BUCKET_SIZE) - highest_bit(FIRST_BUCKET_SIZE);

@@ -17,4 +17,8 @@ int main(){
     }
 
     std::cout<<x.pop_back()<<" "<<x.pop_back()<<std::endl;
+    int v = 1;
+    int* y = &v;
+    int z = *y;
+    std::cout<<y<<" "<<&z << std::endl;
 }
