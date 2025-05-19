@@ -10,13 +10,15 @@
 
 #define FIRST_BUCKET_SIZE 8 // as stated in 3.3 operations
 
-// setting 16 as our max becuase our vector grows exponentially with FIRST_BUCKET_SIZE
-// here our max elements would be the sum of FIRST_BUCKET_SIZE^(1...16)
-// or in other words FIRST_BUCKET_SIZE^(1....VEC_L1_MAX_SIZE)
-// also we are limited by the number of bits used for indexing
+// setting our max L1 size because it grows exponentially with powers of 2
+// ie) our max size is = 2^1 + 2^2 + 2^3 + ... + 2^(MAX_L1_SIZE)
 #define VEC_L1_MAX_SIZE 32
 
-// used for the pool 
+// max threads we are going to use on our vector
+// this is necessary for the pool since it needs to know how much memory to allocate up front
+// going under the number ins't a problem but spawning over the MAX_THREADS will cause weird memory issues
+// due to over writes and conflicts which shouldn't happen (or the program will get stuck in infinite loop)
+// put simply don't go over this number
 #define MAX_THREADS 32
 
 // NOTE:
@@ -32,6 +34,15 @@ int highest_bit(int x){
     return res - 1;
 }
 
+// alternative (untested) to __bit_width as some version don't allow it
+// int highest_bit(int x){
+//     for(int i=31; i>0; i--){
+//         if(x & (0b1<<i))
+//             return i;
+//     }
+//     return 0;
+// }
+
 namespace lockfree {
 // contains the logic and functions necessary to complete vector operations
 // what the user will use at an abstract level
@@ -45,6 +56,19 @@ private:
     std::atomic<mem::Node<T>*> descriptor;
 
     // our memory pool
+    // 
+    // why is our memory complexity O(2*MAX_THREADS+1)?
+    // 
+    // due to the way we reference nodes each thread can have a max of 2 references
+    // 1 to the Vector descriptor and one to its personal local copy 
+    // 
+    // since threads can be delayed arbitrarily these references can lag behind successful CAS operations
+    // but since they will only have a max of 2 references the worst case is
+    // that each thread has one reference to an delayed descriptor and one to its local copy
+    //
+    // We then have +1 for the Vector Descriptor (which is its own reference) 
+    // I think the +1 is unnecessary because of the progress gunarate of at least one thread succeeding
+    // but I didn't prove this hard so I left it in
     mem::Pool<T> pool = mem::Pool<T>(2*(MAX_THREADS)+1);
     
 
@@ -92,12 +116,7 @@ public:
 
         // init our first bucket
         alloc_bucket(0);
-        // this->descriptor.store(new Descriptor<T>(nullptr,0,0));
         this->descriptor.store(pool.alloc());
-    }
-    ~Vector(){
-        mem::Node<T>* b = this->descriptor.load();
-        std::cout << "ending descriptor: "<<b->id << std::endl;
     }
 
     // vector functions
@@ -105,62 +124,62 @@ public:
 
     mem::Node<T>* fetch_descriptor() {
         while (true) {
+            // fetch local copy
             mem::Node<T>* node = this->descriptor.load(std::memory_order_acquire);
-            // int old = node->ref.fetch_add(1, std::memory_order_acq_rel);
+
+            // attempt to insert our reference on the block
             node = this->pool.alloc(node->id);
 
+            // check to make sure descriptor didn't change
+            // if it did then our reference will be invalid
             if (node == this->descriptor.load(std::memory_order_acquire)) {
                 return node;
             }
 
             // Someone else swapped it — roll back our reference
-            // node->ref.fetch_sub(1, std::memory_order_acq_rel);
             pool.release(node->id);
+        }
     }
-}
 
-    // [TODO]: add proper memory managment
     void push_back(T elem){
         mem::Node<T>* thread_node = pool.alloc(); // fetch our block
-        // std::cout<<"grabbed node: "<<thread_node->id<<std::endl;
         while(true){
-            // std::cout<<"attempting push"<<std::endl;
-            mem::Node<T>* curr_node = fetch_descriptor(); // fetch our descriptor
-            Descriptor<T>* desc_curr = &curr_node->desc;
+            mem::Node<T>* curr_node = fetch_descriptor(); // fetch our descriptor (+1 ref)
+            Descriptor<T>* desc_curr = &curr_node->desc; // grab desc
  
-            // Descriptor<T>* desc_curr = this->descriptor.load();
-            // std::cout<<"attempting to complete write"<<std::endl;
             complete_write(desc_curr->write);
 
+            // bucket logic
             int bucket = highest_bit(desc_curr->size + FIRST_BUCKET_SIZE) - highest_bit(FIRST_BUCKET_SIZE);
-            // std::cout<<"pushing on bucket "<<bucket<<std::endl;
-
             if(this->memory[bucket] == nullptr){
-                // std::cout<<desc_curr->size<<" "<<highest_bit(desc_curr->size+FIRST_BUCKET_SIZE)-highest_bit(FIRST_BUCKET_SIZE)<<std::endl;
                 alloc_bucket(bucket);
             }
 
+            // new descriptors (local copies)
             WriteDescriptor<T> write_op = WriteDescriptor<T>(*at(desc_curr->size), elem, desc_curr->size);
-            Descriptor<T> desc_new = Descriptor(&thread_node->write, desc_curr->size + 1, 0);
+            Descriptor<T> desc_new = Descriptor(&thread_node->write, desc_curr->size + 1);
             
+            // insert our local copies into our memory block
             thread_node->write.replace(write_op); 
             thread_node->desc.replace(desc_new); 
-
-
-            // WriteDescriptor<T>* write_op = new WriteDescriptor<T>(*at(desc_curr->size), elem, desc_curr->size);
-            // Descriptor<T>* desc_new = new Descriptor(write_op, desc_curr->size + 1, 0);
             
+            // need to keep old reference to the descriptor since compare_exchange will update curr_node 
+            // this is necessary because we need to drop our reference if the descriptor changed
+            // however CXS will update our reference which will prevent us from dropping
+            // it will also lead to negative references
+            // [took an all nighter to figure this out and memory debuggers :( ]
             mem::Node<T>* old = curr_node;
             if(this->descriptor.compare_exchange_strong(curr_node,thread_node)){
+                // we don't need to add a new reference for the vector descriptor
+                // since we will just reuse our reference when fetching the local copy (thread_node)
                 swapped_desc(curr_node->id);
                 break;
             }
-            // std::cout<<"FAILED CAS push_back "<<std::this_thread::get_id()<<"\n";
+
+            // we failed the CAS so we could drop this reference
             pool.release(old->id);
-            // pool.release(curr_node->id);
         }   
 
-        // complete_write(this->descriptor.load()->write);
         mem::Node<T>* curr = fetch_descriptor();
         complete_write(&curr->write);
         pool.release(curr->id);
@@ -169,7 +188,6 @@ public:
     T pop_back(){
         mem::Node<T>* thread_node = pool.alloc(); // fetch our block
         while(true){
-            // Descriptor<T>* desc_curr = this->descriptor.load();
             mem::Node<T>* curr_node = fetch_descriptor();
             Descriptor<T>* desc_curr = &curr_node->desc;
 
@@ -177,7 +195,7 @@ public:
 
             T res = *at(desc_curr->size - 1);
 
-            Descriptor<T> desc_new = Descriptor<T>(nullptr,desc_curr->size-1,0);
+            Descriptor<T> desc_new = Descriptor<T>(nullptr,desc_curr->size-1);
             thread_node->desc.replace(desc_new);
 
             mem::Node<T>* old = curr_node;
@@ -222,6 +240,10 @@ public:
         return size;
     }
 
+    // why do we drop twice when switching the descriptor
+    // the reason is the vectors descriptor counts as it's own reference
+    // meaning we need to drop the current Thread and the Vector Descriptor
+    // since it moved
     inline void swapped_desc(int desc_id) {
         pool.release(desc_id);
         pool.release(desc_id); 

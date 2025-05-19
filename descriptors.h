@@ -16,10 +16,6 @@ public:
     : old_val(_old_val), new_val(_new_val), pos(_pos), completed(false){}
 
     void replace(WriteDescriptor<T> _new){
-        // if(this == _new){
-            // return;
-        // }
-
         old_val = _new.old_val;
         new_val = _new.new_val;
         pos = _new.pos;
@@ -35,38 +31,14 @@ public:
     WriteDescriptor<T>* write = nullptr;
     size_t size;
 
-    // reference counter logic
-    std::atomic<size_t> counter; 
-    std::atomic<bool> can_reference = true;
-
-    Descriptor() : write(nullptr), size(0), counter(0){};
-    Descriptor(WriteDescriptor<T>* _write, size_t _size, size_t _counter): write(_write),size(_size),counter(_counter){};
-    // ~Descriptor(){
-        // std::cout<<"dropped\n";
-    // }
-
-    void reference(){
-        counter.fetch_add(1);
-    }
-
-    void reference_disconnect(){
-        can_reference.store(false);
-    }
-
-    bool dereference(){
-        size_t res = counter.fetch_add(-1);
-        return res <= 1 && !can_reference; // last thread to hold a reference
-    }
+    Descriptor() : write(nullptr), size(0){};
+    Descriptor(WriteDescriptor<T>* _write, size_t _size): write(_write),size(_size){};
 
     bool write_op_pending(){
         return (this->write != nullptr && !this->write->completed);
     }
 
     void replace(Descriptor<T>& _new){
-        // if(this == _new){
-            // return;
-        // }
-
         write = _new.write;
         size = _new.size;
     }

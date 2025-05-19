@@ -45,7 +45,7 @@ int main(){
         threads.push_back(std::thread(work,i));
     }
 
-    std::this_thread::sleep_for(std::chrono::seconds(10));
+    std::this_thread::sleep_for(std::chrono::seconds(60));
     cancel_flag = true;
     std::cout<<"starting cancel\n";
 
