@@ -17,7 +17,7 @@
 #define VEC_L1_MAX_SIZE 32
 
 // used for the pool 
-#define MAX_THREADS 2
+#define MAX_THREADS 4
 
 // NOTE:
 // we can replace the HighestBit instruciton with std::bit_width(x) in C++ 20
@@ -45,7 +45,7 @@ private:
     std::atomic<mem::Node<T>*> descriptor;
 
     // our memory pool
-    mem::Pool<T> pool = mem::Pool<T>(2*(MAX_THREADS+1));
+    mem::Pool<T> pool = mem::Pool<T>(2*(MAX_THREADS)+1);
     
 
     // indexes into our array at the specfic spot we need with clever bitwise operations
@@ -79,6 +79,7 @@ private:
         // someone has already alloced this bucket
         if(!res){ 
             delete[] bucket_new;
+            return;
         }
         std::cout<<"alloced new bucket size "<<bucket_size<<" for bucket "<<bucket<<std::endl;
     }
@@ -165,13 +166,15 @@ public:
 
             // WriteDescriptor<T>* write_op = new WriteDescriptor<T>(*at(desc_curr->size), elem, desc_curr->size);
             // Descriptor<T>* desc_new = new Descriptor(write_op, desc_curr->size + 1, 0);
-
+            
+            mem::Node<T>* old = curr_node;
             if(this->descriptor.compare_exchange_strong(curr_node,thread_node)){
                 swapped_desc(curr_node->id);
                 break;
             }
-            std::cout<<"FAILED CAS push_back "<<std::this_thread::get_id()<<"\n";
-            pool.release(curr_node->id);
+            // std::cout<<"FAILED CAS push_back "<<std::this_thread::get_id()<<"\n";
+            pool.release(old->id);
+            // pool.release(curr_node->id);
         }   
 
         // complete_write(this->descriptor.load()->write);
