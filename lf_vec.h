@@ -107,20 +107,6 @@ private:
         }
         std::cout<<"alloced new bucket size "<<bucket_size<<" for bucket "<<bucket<<std::endl;
     }
-public:
-    Vector(){
-        // defaulting the pointer to NULL for easy alloc_bucket operations
-        for(int i=0;i<VEC_L1_MAX_SIZE;i++){
-            this->memory[i]=nullptr;
-        }
-
-        // init our first bucket
-        alloc_bucket(0);
-        this->descriptor.store(pool.alloc());
-    }
-
-    // vector functions
-    void resize(size_t size);
 
     mem::Node<T>* fetch_descriptor() {
         while (true) {
@@ -141,6 +127,34 @@ public:
         }
     }
 
+    void complete_write(WriteDescriptor<T>* write_op){
+        if(write_op != nullptr && !write_op->completed){
+            at(write_op->pos)->compare_exchange_strong(write_op->old_val,write_op->new_val);
+            write_op->completed = true;
+        }
+    }
+
+    // why do we drop twice when switching the descriptor
+    // the reason is the vectors descriptor counts as it's own reference
+    // meaning we need to drop the current Thread and the Vector Descriptor
+    // since it moved
+    inline void swapped_desc(int desc_id) {
+        pool.release(desc_id);
+        pool.release(desc_id); 
+    }
+public:
+    Vector(){
+        // defaulting the pointer to NULL for easy alloc_bucket operations
+        for(int i=0;i<VEC_L1_MAX_SIZE;i++){
+            this->memory[i]=nullptr;
+        }
+
+        // init our first bucket
+        alloc_bucket(0);
+        this->descriptor.store(pool.alloc());
+    }
+
+    // vector functions
     void push_back(T elem){
         mem::Node<T>* thread_node = pool.alloc(); // fetch our block
         while(true){
@@ -217,15 +231,7 @@ public:
         return at(idx)->load();
     }
 
-    // other
-    void complete_write(WriteDescriptor<T>* write_op){
-        if(write_op != nullptr && !write_op->completed){
-            at(write_op->pos)->compare_exchange_strong(write_op->old_val,write_op->new_val);
-            write_op->completed = true;
-        }
-    }
-
-
+    // other 
     size_t size(){
         mem::Node<T>* block = fetch_descriptor();
         size_t size = block->desc.size;
@@ -238,16 +244,7 @@ public:
 
         pool.release(block->id);
         return size;
-    }
-
-    // why do we drop twice when switching the descriptor
-    // the reason is the vectors descriptor counts as it's own reference
-    // meaning we need to drop the current Thread and the Vector Descriptor
-    // since it moved
-    inline void swapped_desc(int desc_id) {
-        pool.release(desc_id);
-        pool.release(desc_id); 
-    }
+    } 
 };
 };
 
