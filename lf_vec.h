@@ -19,11 +19,13 @@
 // going under the number ins't a problem but spawning over the MAX_THREADS will cause weird memory issues
 // due to over writes and conflicts which shouldn't happen (or the program will get stuck in infinite loop)
 // put simply don't go over this number
-#define MAX_THREADS 32
+// #define MAX_THREADS 32
+int MAX_THREADS = 32;
 
 // this should equla MAX_THREADS
 // but you can set it to 1 for orginal version
-#define MAX_POOLS MAX_THREADS
+// #define MAX_POOLS 1
+int MAX_POOLS = 1;
 
 // as stated in comments further down in the code
 #define POOL_SIZE 2*MAX_THREADS+1
@@ -84,7 +86,7 @@ private:
     
     // mega pool used for bench marking
     // id is the given thread
-    mem::Pool<T> pools[MAX_THREADS];
+    mem::Pool<T>* pools = new mem::Pool<T>[MAX_THREADS];
     
 
     // indexes into our array at the specfic spot we need with clever bitwise operations
