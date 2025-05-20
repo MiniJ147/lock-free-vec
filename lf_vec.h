@@ -23,7 +23,7 @@
 
 // this should equla MAX_THREADS
 // but you can set it to 1 for orginal version
-#define MAX_POOLS MAX_THREADS 
+#define MAX_POOLS MAX_THREADS
 
 // as stated in comments further down in the code
 #define POOL_SIZE 2*MAX_THREADS+1
@@ -62,7 +62,8 @@ private:
     // array of atomic pointers, pointing to an array of atomic references of T 
     std::atomic<std::atomic<T>*> memory[VEC_L1_MAX_SIZE]; 
 
-    // std::atomic<Descriptor<T>*> descriptor;
+    std::atomic<Descriptor<T>*> _descriptor; // benchmarking with leaks
+
     std::atomic<mem::Node<T>*> descriptor;
 
     // our memory pool
@@ -119,7 +120,7 @@ private:
             delete[] bucket_new;
             return;
         }
-        std::cout<<"alloced new bucket size "<<bucket_size<<" for bucket "<<bucket<<std::endl;
+        // std::cout<<"alloced new bucket size "<<bucket_size<<" for bucket "<<bucket<<std::endl;
     }
 
     mem::Node<T>* fetch_descriptor() {
@@ -171,6 +172,48 @@ public:
         // init our first bucket
         alloc_bucket(0);
         this->descriptor.store(pools[0].alloc()); // give thread 0 descriptor reference
+        this->_descriptor.store(new Descriptor<T>(nullptr,0));
+    }
+
+    void push_back_LEAK(T elem){
+        while(true){
+            Descriptor<T>* desc_curr = this->_descriptor.load();
+
+            complete_write(desc_curr->write);
+
+            int bucket = highest_bit(desc_curr->size + FIRST_BUCKET_SIZE) - highest_bit(FIRST_BUCKET_SIZE);
+            // std::cout<<"pushing on bucket "<<bucket<<std::endl;
+
+            if(this->memory[bucket] == nullptr){
+                alloc_bucket(bucket);
+            }
+
+            WriteDescriptor<T>* write_op = new WriteDescriptor<T>(*at(desc_curr->size), elem, desc_curr->size);
+            Descriptor<T>* desc_new = new Descriptor(write_op, desc_curr->size + 1);
+
+            if(this->_descriptor.compare_exchange_strong(desc_curr,desc_new)){
+                break;
+            }
+
+            delete write_op;
+            delete desc_new;
+        }   
+
+        complete_write(this->_descriptor.load()->write);
+    }
+
+    T pop_back_LEAK(){
+        while(true){
+            Descriptor<T>* desc_curr = this->_descriptor.load();
+            complete_write(desc_curr->write);
+
+            T res = *at(desc_curr->size - 1);
+            Descriptor<T>* desc_new = new Descriptor<T>(nullptr,desc_curr->size-1);
+
+            if(this->_descriptor.compare_exchange_strong(desc_curr,desc_new)){
+                return res;
+            }
+        }
     }
 
     // vector functions
@@ -225,6 +268,11 @@ public:
             Descriptor<T>* desc_curr = &curr_node->desc;
 
             complete_write(desc_curr->write);
+
+            // spin until vaild element comes in
+            if(desc_curr->size == 0){
+                continue;
+            }
 
             T res = *at(desc_curr->size - 1);
 
