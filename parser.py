@@ -2,6 +2,7 @@ import re
 import sys
 import matplotlib.pyplot as plt
 import math
+import os
 
 def parse_and_plot_tests(input_file):
     with open(input_file, 'r') as f:
@@ -15,11 +16,21 @@ def parse_and_plot_tests(input_file):
 
     while i < len(lines):
         if lines[i] == "START_TEST":
-            i += 1
-            if i >= len(lines):
-                break
-            test_title_raw = lines[i].strip()
-            i += 1
+            # The line *after* START_TEST is the "locked tests | seed: 42 | pools: 1 | 15+ / 5- / 10w / 70r"
+            title_line = None
+            if i + 1 < len(lines):
+                title_line = lines[i + 1]
+            i += 2
+
+            # Extract relevant title info: seed and last 4 parts
+            # Example: locked tests | seed: 42 | pools: 1 | 15+ / 5- / 10w / 70r
+            # We want: (seed: 42 | 15+ / 5- / 10w / 70r)
+            seed_match = re.search(r"seed:\s*\d+", title_line) if title_line else None
+            last_parts_match = re.search(r"(\d+\+ / \d+- / \d+w / \d+r)", title_line) if title_line else None
+            if seed_match and last_parts_match:
+                graph_title = f"({seed_match.group(0)} | {last_parts_match.group(1)})"
+            else:
+                graph_title = title_line if title_line else "Test"
 
             section_data = {name: {} for name in section_names}
             threads_set = set()
@@ -42,7 +53,7 @@ def parse_and_plot_tests(input_file):
                 i += 1
 
             tests_data.append({
-                "title": test_title_raw,
+                "title": graph_title,
                 "sections": section_data,
                 "threads": sorted(threads_set),
                 "max_time": max_time
@@ -84,8 +95,12 @@ def parse_and_plot_tests(input_file):
         ax.legend()
 
     plt.tight_layout()
-    plt.savefig("mega_page.svg")
+    
+    base_name = os.path.splitext(os.path.basename(input_file))[0]
+    output_file = f"{base_name}_graph.svg"
+    plt.savefig(output_file)
     plt.close()
+    print(f"Saved mega page graph as {output_file}")
 
-# Run the function on your input file
+# Example usage
 parse_and_plot_tests(sys.argv[1])
