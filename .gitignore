@@ -1,2 +1,5 @@
 *.out
 .vscode/
+*.res
+
+data.csv

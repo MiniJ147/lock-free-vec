@@ -178,6 +178,9 @@ public:
     }
 
     void push_back_LEAK(T elem){
+        WriteDescriptor<T>* write_op = new WriteDescriptor<T>();
+        Descriptor<T>* desc_new = new Descriptor<T>();
+
         while(true){
             Descriptor<T>* desc_curr = this->_descriptor.load();
 
@@ -190,31 +193,45 @@ public:
                 alloc_bucket(bucket);
             }
 
-            WriteDescriptor<T>* write_op = new WriteDescriptor<T>(*at(desc_curr->size), elem, desc_curr->size);
-            Descriptor<T>* desc_new = new Descriptor(write_op, desc_curr->size + 1);
+            // WriteDescriptor<T>* write_op = new WriteDescriptor<T>(*at(desc_curr->size), elem, desc_curr->size);
+            // Descriptor<T>* desc_new = new Descriptor(write_op, desc_curr->size + 1);
+            write_op->old_val = *at(desc_curr->size);
+            write_op->new_val = elem;
+            write_op->pos = desc_curr->size;
+            write_op->completed = false;
+
+            desc_new->size = desc_curr->size + 1;
+            desc_new->write = write_op;
 
             if(this->_descriptor.compare_exchange_strong(desc_curr,desc_new)){
                 break;
             }
-
-            delete write_op;
-            delete desc_new;
         }   
 
         complete_write(this->_descriptor.load()->write);
     }
 
     T pop_back_LEAK(){
+        Descriptor<T>* desc_new = new Descriptor<T>(nullptr,0);
         while(true){
             Descriptor<T>* desc_curr = this->_descriptor.load();
             complete_write(desc_curr->write);
 
+            // prevent seg faults idk if this is the best for partical use
+            // would have to add errrors or something, but this is for testing
+            if(desc_curr->size == 0){                
+                return *at(desc_curr->size);
+            }
+
             T res = *at(desc_curr->size - 1);
-            Descriptor<T>* desc_new = new Descriptor<T>(nullptr,desc_curr->size-1);
+            // Descriptor<T>* desc_new = new Descriptor<T>(nullptr,desc_curr->size-1);
+            desc_new->write = nullptr;
+            desc_new->size = desc_curr->size-1;
 
             if(this->_descriptor.compare_exchange_strong(desc_curr,desc_new)){
                 return res;
             }
+
         }
     }
 
@@ -271,9 +288,12 @@ public:
 
             complete_write(desc_curr->write);
 
-            // spin until vaild element comes in
-            if(desc_curr->size == 0){
-                continue;
+            // prevent seg faults idk if this is the best for partical use
+            // would have to add errrors or something, but this is for testing
+            if(desc_curr->size <= 0){
+                pools[curr_node->pool_id].release(curr_node->id);
+                pools[thread_node->pool_id].release(thread_node->id);
+                return *at(desc_curr->size);
             }
 
             T res = *at(desc_curr->size - 1);

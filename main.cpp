@@ -25,8 +25,8 @@ std::vector<int> locked_vector(FIRST_BUCKET_SIZE);
 std::vector<std::thread> threads;
 std::vector<std::vector<Op>> sequences;
 
-int PER_THREAD_OPERATIONS = 500000; // as stated in paper
 int SEED = 42;
+int PER_THREAD_OPERATIONS = 500000;
 bool LF = false;
 bool LEAK = false;
 
@@ -69,7 +69,7 @@ std::vector<Op> generate_operation_sequence(
 }
 
 void lf_work(int thread_id,lockfree::Vector<int>& lf_vec){
-    int v;
+    int v; 
     std::vector<Op>& sequence = sequences[thread_id];
 
     lf_vec.set_id(thread_id);
@@ -119,7 +119,8 @@ void mtx_work(int thread_id){
                 locked_vector[1] = 10;
             break;
             case Op::Pop:
-                locked_vector.pop_back();
+                if(locked_vector.size()>0)
+                    locked_vector.pop_back();
             break;
             case Op::Push:
                 locked_vector.push_back(1);
@@ -134,6 +135,7 @@ int main(int argc, char* argv[]){
     int write_prob = 0;
     int push_prob = 0;
     int pop_prob = 0;
+    bool suppress_prints = false;
 
     for(int i=1; i<argc; i++){
         std::string arg(argv[i]);
@@ -141,39 +143,60 @@ int main(int argc, char* argv[]){
             LF = true;
         if(arg == "-l")
             LF = false;
+        if(arg == "-s")
+            suppress_prints = true;
         if(arg == "-leak")
             LEAK = true;
-        if(arg == "-threads")
+        if(arg == "-threads"){
+            assert(i+1 < argc);
             MAX_THREADS = std::atoi(argv[i+1]);
-        if(arg == "-pools")
+        }
+        if(arg == "-pools"){
+            assert(i+1 < argc);
             MAX_POOLS = std::atoi(argv[i+1]);
-        if(arg == "-ops")
+        }
+        if(arg == "-ops"){
+            assert(i+1 < argc);
             PER_THREAD_OPERATIONS = std::atoi(argv[i+1]);
-        if(arg == "-seed")
+        }
+        if(arg == "-seed"){
+            assert(i+1 < argc);
             SEED = std::atoi(argv[i+1]);  
-        if(arg == "-push")
+        }
+        if(arg == "-push"){
+            assert(i+1 < argc);
             push_prob = std::atoi(argv[i+1]);
-        if(arg == "-pop")
+        }
+        if(arg == "-pop"){
+            assert(i+1 < argc);
             pop_prob = std::atoi(argv[i+1]);
-        if(arg == "-write")
+        }
+        if(arg == "-write"){
+            assert(i+1 < argc);
             write_prob = std::atoi(argv[i+1]);
-        if(arg == "-read")
+        }
+        if(arg == "-read"){
+            assert(i+1 < argc);
             read_prob = std::atoi(argv[i+1]);
+        }
     } 
-
-    
     lockfree::Vector<int> lf_vec;
-    printf("starting simulation\nThreads: %d\nLock Free: %d\nLeak: %d\nOperations: %d\nPools: %d\nSeed: %d\n\n",MAX_THREADS,LF,LEAK,PER_THREAD_OPERATIONS,MAX_POOLS,SEED);
+
     std::map<Op, int> percentages = {
         {Op::Read, read_prob},
         {Op::Write, write_prob},
         {Op::Push, push_prob},
         {Op::Pop, pop_prob}
     };
+
     assert(read_prob + write_prob + push_prob + pop_prob == 100);
-    std::cout<<"Operation Probabilities\n";
-    for(const auto& pair: percentages){
-        std::cout<<op_to_string(pair.first)<<": "<<pair.second<<"%\n";
+
+    if(!suppress_prints){
+        printf("starting simulation\nThreads: %d\nLock Free: %d\nLeak: %d\nOperations: %d\nPools: %d\nSeed: %d\n\n",MAX_THREADS,LF,LEAK,PER_THREAD_OPERATIONS,MAX_POOLS,SEED);
+        std::cout<<"Operation Probabilities\n";
+        for(const auto& pair: percentages){
+            std::cout<<op_to_string(pair.first)<<": "<<pair.second<<"%\n";
+        }
     }
 
     // generate sequences for each thread
@@ -195,7 +218,7 @@ int main(int argc, char* argv[]){
     }
     auto end = std::chrono::high_resolution_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end-start);
-    std::cout<<"total time: "<<duration.count()<<"ms\n";
+    std::cout<<"Threads: "<<MAX_THREADS<<"\tTotal Time: "<<duration.count()<<"ms\n";
  
     return 0;
 } 
