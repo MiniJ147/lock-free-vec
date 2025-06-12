@@ -8,6 +8,9 @@
 #include "descriptors.h"
 #include "mem_pool.h"
 
+// warning do not change this as it effects our alloc_bucket shifting
+// this change was because we were having indexing issues earlier in the implementation
+// so to be on the safe side do NOT change
 #define FIRST_BUCKET_SIZE 8 // as stated in 3.3 operations
 
 // setting our max L1 size because it grows exponentially with powers of 2
@@ -109,7 +112,7 @@ private:
     // new_bucket_size = FIRST_BUCKET_SIZE^(bucket+1)
     void alloc_bucket(int bucket){
         // int bucket_size = pow(FIRST_BUCKET_SIZE,bucket+1);
-        int bucket_size = 0b1 << (bucket+3);
+        int bucket_size = 0b1 << (bucket+3); // we add 3 to it because we want to start our bucket off at 8
 
         std::atomic<T>* bucket_new = new std::atomic<T>[bucket_size]; // alloc new bucket
         std::atomic<T>* bucket_empty = nullptr; // empty bucket
@@ -159,6 +162,16 @@ private:
         pools[pool_id].release(desc_id);
         pools[pool_id].release(desc_id); 
     }
+
+    // alloc all of our buckets so we don't have to worry about memory allocation in our algorithms
+    void alloc_buckets_bench_mark(int per_thread_operations){
+        long int max_size = per_thread_operations * MAX_THREADS;
+        int hibit = highest_bit(max_size);
+
+        for(int bucket_id=1; bucket_id<=hibit; bucket_id++){
+            this->alloc_bucket(bucket_id);
+        }
+    }
 public:
     Vector(){
         // defaulting the pointer to NULL for easy alloc_bucket operations
@@ -175,6 +188,11 @@ public:
         alloc_bucket(0);
         this->descriptor.store(pools[0].alloc()); // give thread 0 descriptor reference
         this->_descriptor.store(new Descriptor<T>(nullptr,0));
+    }
+
+    // this function is used to inti ourselves for benchmarking purposes
+    void init_for_benchmarks(int per_thread_operations){
+        alloc_buckets_bench_mark(per_thread_operations);
     }
 
     void push_back_LEAK(T elem){

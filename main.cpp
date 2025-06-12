@@ -130,13 +130,14 @@ void mtx_work(int thread_id){
     }
 }
 
-int main(int argc, char* argv[]){
-    int read_prob = 100;
-    int write_prob = 0;
-    int push_prob = 0;
-    int pop_prob = 0;
-    bool suppress_prints = false;
-
+void parse_args(
+    int argc,
+    char * argv[],
+    int &read_prob, 
+    int &write_prob, 
+    int &push_prob, 
+    int &pop_prob, 
+    bool &suppress_prints){
     for(int i=1; i<argc; i++){
         std::string arg(argv[i]);
         if(arg =="-lf")
@@ -179,8 +180,28 @@ int main(int argc, char* argv[]){
             assert(i+1 < argc);
             read_prob = std::atoi(argv[i+1]);
         }
-    } 
+    }
+}
+
+int main(int argc, char* argv[]){
+    int read_prob = 100;
+    int write_prob = 0;
+    int push_prob = 0;
+    int pop_prob = 0;
+    bool suppress_prints = false;
+
+    parse_args(
+        argc,
+        argv,
+        read_prob,
+        write_prob,
+        push_prob,
+        pop_prob,
+        suppress_prints);
+    
+    // inti ourselves for bench marks
     lockfree::Vector<int> lf_vec;
+    lf_vec.init_for_benchmarks(PER_THREAD_OPERATIONS);
 
     std::map<Op, int> percentages = {
         {Op::Read, read_prob},
