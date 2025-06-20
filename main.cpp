@@ -20,15 +20,25 @@ enum class Op {
     Pop 
 };
 
-std::mutex mtx;
-std::vector<int> locked_vector(FIRST_BUCKET_SIZE);
-std::vector<std::thread> threads;
-std::vector<std::vector<Op>> sequences;
-
 int SEED = 42;
 int PER_THREAD_OPERATIONS = 500000;
 bool LF = false;
 bool LEAK = false;
+
+int VEC_SIZE = PER_THREAD_OPERATIONS * MAX_THREADS * 2;
+
+std::mutex mtx;
+std::vector<int> locked_vector(VEC_SIZE);
+std::vector<std::thread> threads;
+std::vector<std::vector<Op>> sequences;
+
+
+// distribtuion logic
+std::random_device rd;
+std::mt19937 gen(rd()); // Mersenne Twister engine
+std::uniform_int_distribution<> distrib(1, 1000);
+
+
 
 std::string op_to_string(Op op) {
     switch(op) {
@@ -79,10 +89,10 @@ void lf_work(int thread_id,lockfree::Vector<int>& lf_vec){
 
         switch(curr_op){
             case Op::Read:
-                v = lf_vec.read_at(0);
+                v = lf_vec.read_at(distrib(gen));
             break;
             case Op::Write:
-                lf_vec.write_at(0,thread_id);
+                lf_vec.write_at(distrib(gen),thread_id);
             break;
             case Op::Pop:
                 if(LEAK){
@@ -113,10 +123,10 @@ void mtx_work(int thread_id){
         mtx.lock();
         switch(curr_op){
             case Op::Read:
-                v = locked_vector[0];
+                v = locked_vector[distrib(gen)];
             break;
             case Op::Write:
-                locked_vector[1] = 10;
+                locked_vector[distrib(gen)] = 10;
             break;
             case Op::Pop:
                 if(locked_vector.size()>0)

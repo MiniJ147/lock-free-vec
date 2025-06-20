@@ -13,9 +13,12 @@
 // so to be on the safe side do NOT change
 #define FIRST_BUCKET_SIZE 8 // as stated in 3.3 operations
 
+// adjustment to make the indexing calculations correct...
+#define POWER_ADJUSTMENT 3
+
 // setting our max L1 size because it grows exponentially with powers of 2
 // ie) our max size is = 2^1 + 2^2 + 2^3 + ... + 2^(MAX_L1_SIZE)
-#define VEC_L1_MAX_SIZE 32
+#define VEC_L1_MAX_SIZE 32 - POWER_ADJUSTMENT - 1
 
 // max threads we are going to use on our vector
 // this is necessary for the pool since it needs to know how much memory to allocate up front
@@ -112,7 +115,7 @@ private:
     // new_bucket_size = FIRST_BUCKET_SIZE^(bucket+1)
     void alloc_bucket(int bucket){
         // int bucket_size = pow(FIRST_BUCKET_SIZE,bucket+1);
-        int bucket_size = 0b1 << (bucket+3); // we add 3 to it because we want to start our bucket off at 8
+        int bucket_size = 0b1 << (bucket+POWER_ADJUSTMENT); // we add 3 to it because we want to start our bucket off at 8
 
         std::atomic<T>* bucket_new = new std::atomic<T>[bucket_size]; // alloc new bucket
         std::atomic<T>* bucket_empty = nullptr; // empty bucket
@@ -168,7 +171,7 @@ private:
         long int max_size = per_thread_operations * MAX_THREADS;
         int hibit = highest_bit(max_size);
 
-        for(int bucket_id=1; bucket_id<=hibit; bucket_id++){
+        for(int bucket_id=1; bucket_id<VEC_L1_MAX_SIZE; bucket_id++){
             this->alloc_bucket(bucket_id);
         }
     }
