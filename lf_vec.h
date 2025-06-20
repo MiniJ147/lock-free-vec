@@ -27,6 +27,7 @@
 // put simply don't go over this number
 // #define MAX_THREADS 32
 int MAX_THREADS = 32;
+constexpr int ABS_MAX_THREADS = 32; // abs max even with configurations
 
 // this should equla MAX_THREADS
 // but you can set it to 1 for orginal version
@@ -38,6 +39,10 @@ int MAX_POOLS = 1;
 
 thread_local int thread_id = -1;
 thread_local int thread_pool = -1;
+thread_local int thread_desc_mem_idx_LEAK = 0;
+
+// benchmark stuff (back practice but its okay I'm just trying to get this done...)
+constexpr int PER_THREAD_OPERATIONS = 500000;
 
 // NOTE:
 // we can replace the HighestBit instruciton with std::bit_width(x) in C++ 20
@@ -70,7 +75,10 @@ private:
     // array of atomic pointers, pointing to an array of atomic references of T 
     std::atomic<std::atomic<T>*> memory[VEC_L1_MAX_SIZE]; 
 
+    // benchmarking with leaks stuff
     std::atomic<Descriptor<T>*> _descriptor; // benchmarking with leaks
+    Descriptor<T>* _descriptor_mem[ABS_MAX_THREADS];
+    WriteDescriptor<T>* _write_descriptor_mem[ABS_MAX_THREADS];
 
     std::atomic<mem::Node<T>*> descriptor;
 
@@ -167,13 +175,20 @@ private:
     }
 
     // alloc all of our buckets so we don't have to worry about memory allocation in our algorithms
-    void alloc_buckets_bench_mark(int per_thread_operations){
-        long int max_size = per_thread_operations * MAX_THREADS;
-        int hibit = highest_bit(max_size);
-
+    void alloc_buckets_bench_mark(){
         for(int bucket_id=1; bucket_id<VEC_L1_MAX_SIZE; bucket_id++){
             this->alloc_bucket(bucket_id);
         }
+    }
+
+    void alloc_descriptor_mem_blocks(int per_thread_operations){
+        int overflow_buff = 500;
+        int arr_size = per_thread_operations+overflow_buff; 
+
+        for(int i=0; i<MAX_THREADS;i++){
+            this->_descriptor_mem[i] = new Descriptor<T>[arr_size];
+            this->_write_descriptor_mem[i] = new WriteDescriptor<T>[arr_size];
+        } 
     }
 public:
     Vector(){
@@ -195,12 +210,15 @@ public:
 
     // this function is used to inti ourselves for benchmarking purposes
     void init_for_benchmarks(int per_thread_operations){
-        alloc_buckets_bench_mark(per_thread_operations);
+        alloc_buckets_bench_mark();
+        alloc_descriptor_mem_blocks(per_thread_operations);
     }
 
     void push_back_LEAK(T elem){
-        WriteDescriptor<T>* write_op = new WriteDescriptor<T>();
-        Descriptor<T>* desc_new = new Descriptor<T>();
+        WriteDescriptor<T>* write_op = &this->_write_descriptor_mem[thread_id][thread_desc_mem_idx_LEAK];
+        Descriptor<T>* desc_new = &this->_descriptor_mem[thread_id][thread_desc_mem_idx_LEAK]; 
+
+        thread_desc_mem_idx_LEAK++;
 
         while(true){
             Descriptor<T>* desc_curr = this->_descriptor.load();
@@ -233,7 +251,9 @@ public:
     }
 
     T pop_back_LEAK(){
-        Descriptor<T>* desc_new = new Descriptor<T>(nullptr,0);
+        Descriptor<T>* desc_new = &this->_descriptor_mem[thread_id][thread_desc_mem_idx_LEAK]; 
+        thread_desc_mem_idx_LEAK++;
+
         while(true){
             Descriptor<T>* desc_curr = this->_descriptor.load();
             complete_write(desc_curr->write);

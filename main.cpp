@@ -21,7 +21,7 @@ enum class Op {
 };
 
 int SEED = 42;
-int PER_THREAD_OPERATIONS = 500000;
+// int PER_THREAD_OPERATIONS = 500000;
 bool LF = false;
 bool LEAK = false;
 
@@ -166,10 +166,10 @@ void parse_args(
             assert(i+1 < argc);
             MAX_POOLS = std::atoi(argv[i+1]);
         }
-        if(arg == "-ops"){
-            assert(i+1 < argc);
-            PER_THREAD_OPERATIONS = std::atoi(argv[i+1]);
-        }
+        // if(arg == "-ops"){
+        //     assert(i+1 < argc);
+        //     PER_THREAD_OPERATIONS = std::atoi(argv[i+1]);
+        // }
         if(arg == "-seed"){
             assert(i+1 < argc);
             SEED = std::atoi(argv[i+1]);  
@@ -208,6 +208,7 @@ int main(int argc, char* argv[]){
         push_prob,
         pop_prob,
         suppress_prints);
+    assert(ABS_MAX_THREADS>=MAX_THREADS); //ensure we don't over compute threads
     
     // inti ourselves for bench marks
     lockfree::Vector<int> lf_vec;
